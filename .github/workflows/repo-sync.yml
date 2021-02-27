@@ -1,5 +1,3 @@
-name: Synchronize repository
-
 on:
   schedule: 
   - cron: "*/15 * * * *"
@@ -24,5 +22,26 @@ jobs:
         destination_branch: stable/ussuri
         github_token: ${{ secrets.GITHUB_TOKEN }}
         pr_title: "Pulling ${{ github.ref }} into stable/ussuri"
+        pr_body: ":crown: *An automated PR*"
+        pr_reviewer: "mnaser"
+  victoria:
+    name: victoria
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Synchronize repository
+      uses: repo-sync/github-sync@v2
+      with:
+        source_repo: https://opendev.org/openstack/ironic-python-agent
+        source_branch: stable/victoria
+        destination_branch: upstream/victoria
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create pull request
+      uses: repo-sync/pull-request@v2
+      with:
+        source_branch: upstream/victoria
+        destination_branch: stable/victoria
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        pr_title: "Pulling ${{ github.ref }} into stable/victoria"
         pr_body: ":crown: *An automated PR*"
         pr_reviewer: "mnaser"
