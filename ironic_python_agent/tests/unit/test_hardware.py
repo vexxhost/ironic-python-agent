@@ -14,6 +14,7 @@
 
 import binascii
 import os
+import stat
 import time
 from unittest import mock
 
@@ -755,6 +756,34 @@ Consistency Policy : resync
     Number   Major   Minor   RaidDevice State
        0     253       64        0      active sync   /dev/vde1
        1     253       80        1      active sync   /dev/vdf1
+""")
+
+MDADM_DETAIL_OUTPUT_WHOLE_DEVICE = ("""/dev/md0:
+           Version : 1.0
+     Creation Time : Fri Feb 15 12:37:44 2019
+        Raid Level : raid1
+        Array Size : 1048512 (1023.94 MiB 1073.68 MB)
+     Used Dev Size : 1048512 (1023.94 MiB 1073.68 MB)
+      Raid Devices : 2
+     Total Devices : 2
+       Persistence : Superblock is persistent
+
+       Update Time : Fri Feb 15 12:38:02 2019
+             State : clean
+    Active Devices : 2
+   Working Devices : 2
+    Failed Devices : 0
+     Spare Devices : 0
+
+Consistency Policy : resync
+
+              Name : abc.xyz.com:0  (local to host abc.xyz.com)
+              UUID : 83143055:2781ddf5:2c8f44c7:9b45d92e
+            Events : 17
+
+    Number   Major   Minor   RaidDevice State
+       0     253       64        0      active sync   /dev/vde
+       1     253       80        1      active sync   /dev/vdf
 """)
 
 MDADM_DETAIL_OUTPUT_NVME = ("""/dev/md0:
@@ -3967,6 +3996,18 @@ class TestGenericHardwareManager(base.IronicAgentTest):
     @mock.patch.object(utils, 'execute', autospec=True)
     def test_get_holder_disks(self, mocked_execute):
         mocked_execute.side_effect = [(MDADM_DETAIL_OUTPUT, '')]
+        holder_disks = hardware.get_holder_disks('/dev/md0')
+        self.assertEqual(['/dev/vde', '/dev/vdf'], holder_disks)
+
+    @mock.patch.object(utils, 'execute', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(os, 'stat', autospec=True)
+    def test_get_holder_disks_with_whole_device(self, mocked_stat,
+                                                mocked_exists,
+                                                mocked_execute):
+        mocked_execute.side_effect = [(MDADM_DETAIL_OUTPUT_WHOLE_DEVICE, '')]
+        mocked_exists.return_value = True
+        mocked_stat.return_value.st_mode = stat.S_IFBLK
         holder_disks = hardware.get_holder_disks('/dev/md0')
         self.assertEqual(['/dev/vde', '/dev/vdf'], holder_disks)
 
