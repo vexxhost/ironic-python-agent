@@ -22,6 +22,7 @@ from multiprocessing.pool import ThreadPool
 import os
 import re
 import shlex
+import stat
 import string
 import time
 
@@ -260,6 +261,13 @@ def get_holder_disks(raid_device):
         holder_parts += device
 
     for part in holder_parts:
+        # NOTE(mnaser): If the last character is not a digit and it is a valid
+        #               device, this means that instead of a partition, it's a
+        #               entire device which is part of this RAID array.
+        if (not part[-1].isdigit() and os.path.exists(part)
+                and stat.S_ISBLK(os.stat(part).st_mode)):
+            holder_disks.append(part)
+            continue
 
         device = utils.extract_device(part)
         if not device:
