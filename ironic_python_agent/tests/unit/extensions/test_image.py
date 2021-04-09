@@ -95,6 +95,127 @@ class TestImageExtension(base.IronicAgentTest):
         )
         mock_iscsi_clean.assert_called_once_with(self.fake_dev)
 
+    @mock.patch.object(iscsi, 'clean_up', autospec=True)
+    @mock.patch.object(image, '_manage_uefi', autospec=True)
+    @mock.patch.object(image, '_install_grub2', autospec=True)
+    def test__install_bootloader_uefi_ignores_manage_failure(
+            self, mock_grub2, mock_uefi,
+            mock_iscsi_clean,
+            mock_execute, mock_dispatch):
+        self.config(ignore_bootloader_failure=True)
+        mock_uefi.side_effect = OSError('meow')
+        mock_dispatch.side_effect = [
+            self.fake_dev, hardware.BootInfo(current_boot_mode='uefi')
+        ]
+        mock_uefi.return_value = False
+        self.agent_extension.install_bootloader(
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi'
+        ).join()
+        mock_dispatch.assert_any_call('get_os_install_device')
+        mock_dispatch.assert_any_call('get_boot_info')
+        self.assertEqual(2, mock_dispatch.call_count)
+        mock_grub2.assert_called_once_with(
+            self.fake_dev,
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            prep_boot_part_uuid=None,
+            target_boot_mode='uefi'
+        )
+        mock_iscsi_clean.assert_called_once_with(self.fake_dev)
+
+    @mock.patch.object(iscsi, 'clean_up', autospec=True)
+    @mock.patch.object(image, '_manage_uefi', autospec=True)
+    @mock.patch.object(image, '_install_grub2', autospec=True)
+    def test__install_bootloader_uefi_ignores_grub_failure(
+            self, mock_grub2, mock_uefi,
+            mock_iscsi_clean,
+            mock_execute, mock_dispatch):
+        self.config(ignore_bootloader_failure=True)
+        mock_grub2.side_effect = OSError('meow')
+        mock_dispatch.side_effect = [
+            self.fake_dev, hardware.BootInfo(current_boot_mode='uefi')
+        ]
+        mock_uefi.return_value = False
+        self.agent_extension.install_bootloader(
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi'
+        ).join()
+        mock_dispatch.assert_any_call('get_os_install_device')
+        mock_dispatch.assert_any_call('get_boot_info')
+        self.assertEqual(2, mock_dispatch.call_count)
+        mock_grub2.assert_called_once_with(
+            self.fake_dev,
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            prep_boot_part_uuid=None,
+            target_boot_mode='uefi'
+        )
+        mock_iscsi_clean.assert_called_once_with(self.fake_dev)
+
+    @mock.patch.object(iscsi, 'clean_up', autospec=True)
+    @mock.patch.object(image, '_manage_uefi', autospec=True)
+    @mock.patch.object(image, '_install_grub2', autospec=True)
+    def test__install_bootloader_uefi_ignores_grub_failure_api_override(
+            self, mock_grub2, mock_uefi,
+            mock_iscsi_clean,
+            mock_execute, mock_dispatch):
+        self.config(ignore_bootloader_failure=False)
+        mock_grub2.side_effect = OSError('meow')
+        mock_dispatch.side_effect = [
+            self.fake_dev, hardware.BootInfo(current_boot_mode='uefi')
+        ]
+        mock_uefi.return_value = False
+        self.agent_extension.install_bootloader(
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi', ignore_bootloader_failure=True,
+        ).join()
+        mock_dispatch.assert_any_call('get_os_install_device')
+        mock_dispatch.assert_any_call('get_boot_info')
+        self.assertEqual(2, mock_dispatch.call_count)
+        mock_grub2.assert_called_once_with(
+            self.fake_dev,
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            prep_boot_part_uuid=None,
+            target_boot_mode='uefi'
+        )
+        mock_iscsi_clean.assert_called_once_with(self.fake_dev)
+
+    @mock.patch.object(iscsi, 'clean_up', autospec=True)
+    @mock.patch.object(image, '_manage_uefi', autospec=True)
+    @mock.patch.object(image, '_install_grub2', autospec=True)
+    def test__install_bootloader_uefi_grub_failure_api_override(
+            self, mock_grub2, mock_uefi,
+            mock_iscsi_clean,
+            mock_execute, mock_dispatch):
+        self.config(ignore_bootloader_failure=True)
+        mock_grub2.side_effect = OSError('meow')
+        mock_dispatch.side_effect = [
+            self.fake_dev, hardware.BootInfo(current_boot_mode='uefi')
+        ]
+        mock_uefi.return_value = False
+        result = self.agent_extension.install_bootloader(
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi', ignore_bootloader_failure=False,
+        ).join()
+        self.assertIsNotNone(result.command_error)
+        mock_dispatch.assert_any_call('get_os_install_device')
+        mock_dispatch.assert_any_call('get_boot_info')
+        self.assertEqual(2, mock_dispatch.call_count)
+        mock_grub2.assert_called_once_with(
+            self.fake_dev,
+            root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            prep_boot_part_uuid=None,
+            target_boot_mode='uefi'
+        )
+        mock_iscsi_clean.assert_called_once_with(self.fake_dev)
+
     @mock.patch.object(hardware, 'is_md_device', lambda *_: False)
     @mock.patch.object(os.path, 'exists', lambda *_: False)
     @mock.patch.object(iscsi, 'clean_up', autospec=True)
@@ -367,13 +488,15 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
         mock_execute.assert_has_calls(expected)
 
     @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(image, '_append_uefi_to_fstab', autospec=True)
     @mock.patch.object(hardware, 'is_md_device', autospec=True)
     @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
     @mock.patch.object(os, 'environ', autospec=True)
     @mock.patch.object(image, '_get_partition', autospec=True)
     def test__install_grub2(self, mock_get_part_uuid, environ_mock,
                             mock_md_get_raid_devices, mock_is_md_device,
-                            mock_execute, mock_dispatch):
+                            mock_append_to_fstab, mock_execute,
+                            mock_dispatch):
         mock_get_part_uuid.return_value = self.fake_root_part
         environ_mock.get.return_value = '/sbin'
         mock_is_md_device.return_value = False
@@ -389,6 +512,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               self.fake_dir + '/run'),
                     mock.call('mount', '-t', 'sysfs', 'none',
                               self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call(('chroot %s /bin/sh -c '
                               '"grub-install %s"' %
                                (self.fake_dir, self.fake_dev)), shell=True,
@@ -398,6 +525,13 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                                '"grub-mkconfig -o '
                                '/boot/grub/grub.cfg"' % self.fake_dir),
                               shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
                               env_variables={
                                   'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('umount', self.fake_dir + '/dev',
@@ -414,6 +548,7 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
         mock_get_part_uuid.assert_called_once_with(self.fake_dev,
                                                    uuid=self.fake_root_uuid)
         self.assertFalse(mock_dispatch.called)
+        self.assertFalse(mock_append_to_fstab.called)
 
     @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
     @mock.patch.object(hardware, 'is_md_device', autospec=True)
@@ -440,6 +575,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               self.fake_dir + '/run'),
                     mock.call('mount', '-t', 'sysfs', 'none',
                               self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call(('chroot %s /bin/sh -c '
                               '"grub-install %s"' %
                                (self.fake_dir, self.fake_prep_boot_part)),
@@ -450,6 +589,13 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                                '"grub-mkconfig -o '
                                '/boot/grub/grub.cfg"' % self.fake_dir),
                               shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
                               env_variables={
                                   'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('umount', self.fake_dir + '/dev',
@@ -469,8 +615,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                                            uuid=self.fake_prep_boot_part_uuid)
         self.assertFalse(mock_dispatch.called)
 
+    @mock.patch.object(os.path, 'ismount', lambda *_: True)
     @mock.patch.object(os.path, 'exists', lambda *_: False)
     @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: True)
+    @mock.patch.object(image, '_append_uefi_to_fstab', autospec=True)
     @mock.patch.object(hardware, 'is_md_device', autospec=True)
     @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
     @mock.patch.object(os, 'environ', autospec=True)
@@ -478,8 +626,8 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
     @mock.patch.object(image, '_get_partition', autospec=True)
     def test__install_grub2_uefi(self, mock_get_part_uuid, mkdir_mock,
                                  environ_mock, mock_md_get_raid_devices,
-                                 mock_is_md_device, mock_execute,
-                                 mock_dispatch):
+                                 mock_is_md_device, mock_append_to_fstab,
+                                 mock_execute, mock_dispatch):
         mock_get_part_uuid.side_effect = [self.fake_root_part,
                                           self.fake_efi_system_part]
         environ_mock.get.return_value = '/sbin'
@@ -500,6 +648,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               self.fake_dir + '/run'),
                     mock.call('mount', '-t', 'sysfs', 'none',
                               self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('mount', self.fake_efi_system_part,
                               self.fake_dir + '/boot/efi'),
                     mock.call(('chroot %s /bin/sh -c "grub-install"' %
@@ -521,9 +673,16 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                                '/boot/grub/grub.cfg"' % self.fake_dir),
                               shell=True,
                               env_variables={
-                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
                     mock.call('umount', self.fake_dir + '/boot/efi',
                               attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('umount', self.fake_dir + '/dev',
                               attempts=3, delay_on_retry=True),
                     mock.call('umount', self.fake_dir + '/proc',
@@ -541,6 +700,687 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
         mock_get_part_uuid.assert_any_call(self.fake_dev,
                                            uuid=self.fake_efi_system_part_uuid)
         self.assertFalse(mock_dispatch.called)
+        mock_append_to_fstab.assert_called_with(self.fake_dir,
+                                                self.fake_efi_system_part_uuid)
+
+    @mock.patch.object(os.path, 'ismount', lambda *_: True)
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_fstab(self, mock_get_part_uuid, mkdir_mock,
+                                       environ_mock, mock_md_get_raid_devices,
+                                       mock_is_md_device, mock_exists,
+                                       mock_execute, mock_dispatch):
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+        mock_exists.side_effect = iter([False, True, False, True, True])
+        with mock.patch('builtins.open', mock.mock_open()) as mock_open:
+            image._install_grub2(
+                self.fake_dev, root_uuid=self.fake_root_uuid,
+                efi_system_part_uuid=self.fake_efi_system_part_uuid,
+                target_boot_mode='uefi')
+            write_calls = [
+                mock.call(self.fake_dir + '/etc/fstab', 'r+'),
+                mock.call().__enter__(),
+                mock.call().read(),
+                mock.call().writelines('UUID=%s\t/boot/efi\tvfat\t'
+                                       'umask=0077\t0\t1'
+                                       '\n' % self.fake_efi_system_part_uuid),
+                mock.call().__exit__(None, None, None)]
+            mock_open.assert_has_calls(write_calls)
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('mount', self.fake_efi_system_part,
+                              self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c "grub2-install"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(('chroot %s /bin/sh -c '
+                              '"grub2-install --removable"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(
+                        'umount', self.fake_dir + '/boot/efi',
+                        attempts=3, delay_on_retry=True),
+                    mock.call('mount', self.fake_efi_system_part,
+                              '/tmp/fake-dir/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('umount', self.fake_dir + '/boot/efi',
+                              attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+        mkdir_mock.assert_called_once_with(self.fake_dir + '/boot/efi')
+        mock_execute.assert_has_calls(expected)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+
+    @mock.patch.object(image, '_efi_boot_setup', lambda *_: False)
+    @mock.patch.object(os.path, 'ismount', lambda *_: True)
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_no_fstab(
+            self, mock_get_part_uuid,
+            mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_execute, mock_dispatch):
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+        fstab_data = (
+            'UUID=%s\tpath vfat option' % self.fake_efi_system_part_uuid)
+        mock_exists.side_effect = [True, False, True, True, True, False,
+                                   True, True]
+        with mock.patch('builtins.open',
+                        mock.mock_open(read_data=fstab_data)) as mock_open:
+            image._install_grub2(
+                self.fake_dev, root_uuid=self.fake_root_uuid,
+                efi_system_part_uuid=self.fake_efi_system_part_uuid,
+                target_boot_mode='uefi')
+            write_calls = [
+                mock.call(self.fake_dir + '/etc/fstab', 'r+'),
+                mock.call().__enter__(),
+                mock.call().read(),
+                mock.call().__exit__(None, None, None)]
+            mock_open.assert_has_calls(write_calls)
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('umount', self.fake_dir + '/boot/efi'),
+                    # NOTE(TheJulia): chroot mount is for whole disk images
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('mount', self.fake_efi_system_part,
+                              self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c "grub2-install"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(('chroot %s /bin/sh -c '
+                              '"grub2-install --removable"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(
+                        'umount', self.fake_dir + '/boot/efi',
+                        attempts=3, delay_on_retry=True),
+                    mock.call('mount', self.fake_efi_system_part,
+                              '/tmp/fake-dir/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('umount', self.fake_dir + '/boot/efi',
+                              attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+        mkdir_mock.assert_called_once_with(self.fake_dir + '/boot/efi')
+        mock_execute.assert_has_calls(expected)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+
+    @mock.patch.object(os.path, 'ismount', lambda *_: False)
+    @mock.patch.object(os, 'listdir', lambda *_: ['file1', 'file2'])
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(image, '_append_uefi_to_fstab', autospec=True)
+    @mock.patch.object(image, '_efi_boot_setup', autospec=True)
+    @mock.patch.object(shutil, 'copytree', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_partition_image_with_loader(
+            self, mock_get_part_uuid, mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_copytree, mock_efi_setup,
+            mock_append_to_fstab, mock_execute,
+            mock_dispatch):
+        mock_exists.side_effect = [True, False, True, True, True, False, True,
+                                   False, False]
+        mock_efi_setup.return_value = True
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+
+        image._install_grub2(
+            self.fake_dev, root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi')
+        mock_efi_setup.assert_called_once_with(self.fake_dev,
+                                               self.fake_efi_system_part_uuid)
+        mock_copytree.assert_has_calls([
+            mock.call(self.fake_dir + '/boot/efi/EFI',
+                      self.fake_dir + '/efi_loader'),
+            mock.call(self.fake_dir + '/efi_loader',
+                      self.fake_dir + '/boot/efi/EFI')])
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call('chroot %s /bin/sh -c "grub2-mkconfig -o '
+                              '/boot/grub2/grub.cfg"' % self.fake_dir,
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('mount', '-t', 'vfat', '/dev/fake1',
+                              self.fake_dir + '/boot/efi'),
+                    mock.call('umount', self.fake_dir + '/boot/efi'),
+                    mock.call('chroot %s /bin/sh -c "umount -a -t '
+                              'vfat"' % self.fake_dir, shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+        mkdir_mock.assert_not_called()
+        mock_execute.assert_has_calls(expected)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+        mock_append_to_fstab.assert_called_with(self.fake_dir,
+                                                self.fake_efi_system_part_uuid)
+
+    @mock.patch.object(os, 'listdir', lambda *_: ['file1', 'file2'])
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(shutil, 'copy2', autospec=True)
+    @mock.patch.object(os.path, 'isfile', autospec=True)
+    @mock.patch.object(image, '_efi_boot_setup', autospec=True)
+    @mock.patch.object(shutil, 'copytree', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_partition_image_with_loader_with_grubcfg(
+            self, mock_get_part_uuid, mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_copytree, mock_efi_setup,
+            mock_isfile, mock_copy2,
+            mock_execute, mock_dispatch):
+        mock_exists.return_value = True
+        mock_efi_setup.return_value = True
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+        mock_isfile.side_effect = [True, False, False, True, True, False]
+
+        image._install_grub2(
+            self.fake_dev, root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi')
+        mock_efi_setup.assert_called_once_with(self.fake_dev,
+                                               self.fake_efi_system_part_uuid)
+        mock_copytree.assert_has_calls([
+            mock.call(self.fake_dir + '/boot/efi/EFI',
+                      self.fake_dir + '/efi_loader'),
+            mock.call(self.fake_dir + '/efi_loader',
+                      self.fake_dir + '/boot/efi/EFI')])
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call(('chroot ' + self.fake_dir + ' /bin/sh -c '
+                               '"grub2-mkconfig -o /boot/grub2/grub.cfg"'),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('mount', '-t', 'vfat', '/dev/fake1',
+                              self.fake_dir + '/boot/efi'),
+                    mock.call('umount', self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot ' + self.fake_dir
+                               + ' /bin/sh -c "umount -a -t vfat"'),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+        mkdir_mock.assert_not_called()
+        mock_execute.assert_has_calls(expected)
+        mock_copy2.assert_has_calls([])
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+
+    @mock.patch.object(os.path, 'ismount', lambda *_: True)
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(image, '_append_uefi_to_fstab', autospec=True)
+    @mock.patch.object(image, '_preserve_efi_assets', autospec=True)
+    @mock.patch.object(image, '_efi_boot_setup', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_partition_image_with_preserve_failure(
+            self, mock_get_part_uuid, mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_efi_setup,
+            mock_preserve_efi_assets,
+            mock_append_to_fstab,
+            mock_execute, mock_dispatch):
+        mock_exists.return_value = True
+        mock_efi_setup.side_effect = Exception('meow')
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+        mock_preserve_efi_assets.return_value = False
+
+        image._install_grub2(
+            self.fake_dev, root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi')
+        self.assertFalse(mock_efi_setup.called)
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('mount', self.fake_efi_system_part,
+                              self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c "grub2-install"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(('chroot %s /bin/sh -c '
+                              '"grub2-install --removable"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(
+                        'umount', self.fake_dir + '/boot/efi',
+                        attempts=3, delay_on_retry=True),
+                    mock.call('mount', self.fake_efi_system_part,
+                              '/tmp/fake-dir/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('umount', self.fake_dir + '/boot/efi',
+                              attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+
+        mkdir_mock.assert_not_called()
+        mock_execute.assert_has_calls(expected)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+        mock_preserve_efi_assets.assert_called_with(
+            self.fake_dir,
+            self.fake_dir + '/boot/efi/EFI',
+            ['/dev/fake1'],
+            self.fake_dir + '/boot/efi')
+        mock_append_to_fstab.assert_called_with(self.fake_dir,
+                                                self.fake_efi_system_part_uuid)
+
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(os, 'listdir', autospec=True)
+    @mock.patch.object(shutil, 'copy2', autospec=True)
+    @mock.patch.object(os.path, 'isfile', autospec=True)
+    @mock.patch.object(image, '_efi_boot_setup', autospec=True)
+    @mock.patch.object(shutil, 'copytree', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_partition_image_with_loader_grubcfg_fails(
+            self, mock_get_part_uuid, mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_copytree, mock_efi_setup,
+            mock_isfile, mock_copy2,
+            mock_oslistdir, mock_execute,
+            mock_dispatch):
+        mock_exists.return_value = True
+        mock_efi_setup.return_value = True
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+        mock_isfile.side_effect = [True, False, False, True, False,
+                                   True, False]
+        mock_copy2.side_effect = OSError('copy failed')
+        mock_oslistdir.return_value = ['file1', 'file2']
+
+        image._install_grub2(
+            self.fake_dev, root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi')
+        mock_efi_setup.assert_called_once_with(self.fake_dev,
+                                               self.fake_efi_system_part_uuid)
+        mock_copytree.assert_has_calls([
+            mock.call(self.fake_dir + '/boot/efi/EFI',
+                      self.fake_dir + '/efi_loader'),
+            mock.call(self.fake_dir + '/efi_loader',
+                      self.fake_dir + '/boot/efi/EFI')])
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call(('chroot ' + self.fake_dir + ' /bin/sh -c '
+                               '"grub2-mkconfig -o /boot/grub2/grub.cfg"'),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('mount', '-t', 'vfat', '/dev/fake1',
+                              self.fake_dir + '/boot/efi'),
+                    mock.call('umount', self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot ' + self.fake_dir
+                               + ' /bin/sh -c "umount -a -t vfat"'),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys', attempts=3,
+                              delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+        mkdir_mock.assert_not_called()
+        mock_execute.assert_has_calls(expected)
+        self.assertEqual(3, mock_copy2.call_count)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+        self.assertEqual(2, mock_oslistdir.call_count)
+
+    @mock.patch.object(os.path, 'ismount', lambda *_: True)
+    @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
+    @mock.patch.object(os, 'listdir', autospec=True)
+    @mock.patch.object(image, '_append_uefi_to_fstab', autospec=True)
+    @mock.patch.object(image, '_efi_boot_setup', autospec=True)
+    @mock.patch.object(shutil, 'copytree', autospec=True)
+    @mock.patch.object(os.path, 'exists', autospec=True)
+    @mock.patch.object(hardware, 'is_md_device', autospec=True)
+    @mock.patch.object(hardware, 'md_get_raid_devices', autospec=True)
+    @mock.patch.object(os, 'environ', autospec=True)
+    @mock.patch.object(os, 'makedirs', autospec=True)
+    @mock.patch.object(image, '_get_partition', autospec=True)
+    def test__install_grub2_uefi_partition_image_with_no_loader(
+            self, mock_get_part_uuid, mkdir_mock,
+            environ_mock, mock_md_get_raid_devices,
+            mock_is_md_device, mock_exists,
+            mock_copytree, mock_efi_setup,
+            mock_append_to_fstab, mock_oslistdir,
+            mock_execute, mock_dispatch):
+        mock_exists.side_effect = [True, False, False, True, True, True, True]
+        mock_efi_setup.side_effect = Exception('meow')
+        mock_oslistdir.return_value = ['file1']
+        mock_get_part_uuid.side_effect = [self.fake_root_part,
+                                          self.fake_efi_system_part]
+        environ_mock.get.return_value = '/sbin'
+        mock_is_md_device.return_value = False
+        mock_md_get_raid_devices.return_value = {}
+
+        image._install_grub2(
+            self.fake_dev, root_uuid=self.fake_root_uuid,
+            efi_system_part_uuid=self.fake_efi_system_part_uuid,
+            target_boot_mode='uefi')
+
+        expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call('mount', '-o', 'bind', '/dev',
+                              self.fake_dir + '/dev'),
+                    mock.call('mount', '-o', 'bind', '/proc',
+                              self.fake_dir + '/proc'),
+                    mock.call('mount', '-o', 'bind', '/run',
+                              self.fake_dir + '/run'),
+                    mock.call('mount', '-t', 'sysfs', 'none',
+                              self.fake_dir + '/sys'),
+                    mock.call('mount', '-t', 'vfat', '/dev/fake1',
+                              self.fake_dir + '/boot/efi'),
+                    mock.call('umount', self.fake_dir + '/boot/efi'),
+
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('mount', self.fake_efi_system_part,
+                              self.fake_dir + '/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c "grub2-install"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(('chroot %s /bin/sh -c '
+                              '"grub2-install --removable"' %
+                               self.fake_dir), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call(
+                        'umount', self.fake_dir + '/boot/efi',
+                        attempts=3, delay_on_retry=True),
+                    mock.call('mount', self.fake_efi_system_part,
+                              '/tmp/fake-dir/boot/efi'),
+                    mock.call(('chroot %s /bin/sh -c '
+                               '"grub2-mkconfig -o '
+                               '/boot/grub2/grub.cfg"' % self.fake_dir),
+                              shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
+                    mock.call('umount', self.fake_dir + '/boot/efi',
+                              attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                    mock.call('umount', self.fake_dir + '/dev',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/proc',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/run',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir + '/sys',
+                              attempts=3, delay_on_retry=True),
+                    mock.call('umount', self.fake_dir, attempts=3,
+                              delay_on_retry=True)]
+
+        mkdir_mock.assert_not_called()
+        mock_execute.assert_has_calls(expected)
+        self.assertEqual(2, mock_copytree.call_count)
+        self.assertTrue(mock_efi_setup.called)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_root_uuid)
+        mock_get_part_uuid.assert_any_call(self.fake_dev,
+                                           uuid=self.fake_efi_system_part_uuid)
+        self.assertFalse(mock_dispatch.called)
+        mock_append_to_fstab.assert_called_with(self.fake_dir,
+                                                self.fake_efi_system_part_uuid)
 
     @mock.patch.object(image, '_is_bootloader_loaded', lambda *_: False)
     @mock.patch.object(hardware, 'is_md_device', autospec=True)
@@ -577,6 +1417,11 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               self.fake_dir + '/run'),
                     mock.call('mount', '-t', 'sysfs', 'none',
                               self.fake_dir + '/sys'),
+                    mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('mount', self.fake_efi_system_part,
                               self.fake_dir + '/boot/efi'),
                     mock.call(('chroot %s /bin/sh -c "grub-install"' %
@@ -610,6 +1455,7 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
         mock_get_part_uuid.side_effect = [self.fake_root_part,
                                           self.fake_efi_system_part]
         mock_is_md_device.side_effect = [False, False]
+        environ_mock.get.return_value = '/sbin'
         mock_md_get_raid_devices.return_value = {}
 
         def mount_raise_func(*args, **kwargs):
@@ -623,6 +1469,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                           efi_system_part_uuid=self.fake_efi_system_part_uuid)
 
         expected = [mock.call('mount', '/dev/fake2', self.fake_dir),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('umount', self.fake_dir + '/dev',
                               attempts=3, delay_on_retry=True),
                     mock.call('umount', self.fake_dir + '/proc',
@@ -876,6 +1726,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               self.fake_dir + '/run'),
                     mock.call('mount', '-t', 'sysfs', 'none',
                               self.fake_dir + '/sys'),
+                    mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('mount', '/dev/sda1',
                               self.fake_dir + '/boot/efi'),
                     mock.call(('chroot %s /bin/sh -c "grub-install"' %
@@ -911,9 +1765,16 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                                '/boot/grub/grub.cfg"' % self.fake_dir),
                               shell=True,
                               env_variables={
-                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                                  'GRUB_DISABLE_OS_PROBER': 'true',
+                                  'GRUB_SAVEDEFAULT': 'true'},
+                              use_standard_locale=True),
                     mock.call('umount', self.fake_dir + '/boot/efi',
                               attempts=3, delay_on_retry=True),
+                    mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                              (self.fake_dir)), shell=True,
+                              env_variables={
+                                  'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
                     mock.call('umount', self.fake_dir + '/dev',
                               attempts=3, delay_on_retry=True),
                     mock.call('umount', self.fake_dir + '/proc',
@@ -980,6 +1841,10 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                       self.fake_dir + '/run'),
             mock.call('mount', '-t', 'sysfs', 'none',
                       self.fake_dir + '/sys'),
+            mock.call(('chroot %s /bin/sh -c "mount -a -t vfat"' %
+                       (self.fake_dir)), shell=True,
+                      env_variables={
+                          'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
             mock.call(('chroot %s /bin/sh -c '
                        '"grub-install %s"' %
                        (self.fake_dir, '/dev/sda')), shell=True,
@@ -994,6 +1859,13 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                        '"grub-mkconfig -o '
                        '/boot/grub/grub.cfg"' % self.fake_dir),
                       shell=True,
+                      env_variables={
+                          'PATH': '/sbin:/bin:/usr/sbin:/sbin',
+                          'GRUB_DISABLE_OS_PROBER': 'true',
+                          'GRUB_SAVEDEFAULT': 'true'},
+                      use_standard_locale=True),
+            mock.call(('chroot %s /bin/sh -c "umount -a -t vfat"' %
+                      (self.fake_dir)), shell=True,
                       env_variables={
                           'PATH': '/sbin:/bin:/usr/sbin:/sbin'}),
             mock.call('umount', self.fake_dir + '/dev',
@@ -1357,3 +2229,11 @@ efibootmgr: ** Warning ** : Boot0005 has same label ironic1\n
                               '\\EFI\\BOOT\\BOOTX64.EFI')]
         self.assertIsNone(result)
         mock_execute.assert_has_calls(expected)
+
+    @mock.patch.object(os.path, 'exists', lambda *_: True)
+    def test__append_uefi_to_fstab_handles_error(self, mock_execute,
+                                                 mock_dispatch):
+        with mock.patch('builtins.open', mock.mock_open()) as mock_open:
+            mock_open.side_effect = OSError('boom')
+            image._append_uefi_to_fstab(
+                self.fake_dir, 'abcd-efgh')

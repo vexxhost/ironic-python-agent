@@ -22,6 +22,7 @@ import tempfile
 
 from ironic_lib import utils as ilib_utils
 from oslo_concurrency import processutils
+from oslo_config import cfg
 from oslo_log import log
 
 from ironic_python_agent import errors
@@ -33,6 +34,7 @@ from ironic_python_agent import utils
 
 LOG = log.getLogger(__name__)
 
+CONF = cfg.CONF
 
 BIND_MOUNTS = ('/dev', '/proc', '/run')
 
@@ -148,6 +150,34 @@ def _has_dracut(root):
     return True
 
 
+def _has_boot_sector(device):
+    """Checks the device for a boot sector indicator."""
+    stdout, stderr = utils.execute('file', '-s', device)
+    if 'boot sector' not in stdout:
+        return False
+    # Now lets check the signature
+    ddout, dderr = utils.execute(
+        'dd', 'if=%s' % device, 'bs=218', 'count=1', binary=True)
+    stdout, stderr = utils.execute('file', '-', process_input=ddout)
+    # The bytes recovered by dd show as a "dos executable" when
+    # examined with file. In other words, the bootloader is present.
+    return 'executable' in stdout
+
+
+def _find_bootable_device(partitions, dev):
+    """Checks the base device and partition for bootloader contents."""
+    LOG.debug('Looking for a bootable device in %s', dev)
+    for line in partitions.splitlines():
+        partition = line.split(':')
+        try:
+            if 'boot' in partition[6]:
+                if _has_boot_sector(dev) or _has_boot_sector(partition[0]):
+                    return True
+        except IndexError:
+            continue
+    return False
+
+
 def _is_bootloader_loaded(dev):
     """Checks the device to see if a MBR bootloader is present.
 
@@ -156,20 +186,6 @@ def _is_bootloader_loaded(dev):
     :returns: True if a device appears to be bootable with a boot
               loader, otherwise False.
     """
-
-    def _has_boot_sector(device):
-        """Check the device for a boot sector indiator."""
-        stdout, stderr = utils.execute('file', '-s', device)
-        if 'boot sector' in stdout:
-            # Now lets check the signature
-            ddout, dderr = utils.execute(
-                'dd', 'if=%s' % device, 'bs=218', 'count=1', binary=True)
-            stdout, stderr = utils.execute('file', '-', process_input=ddout)
-            # The bytes recovered by dd show as a "dos executable" when
-            # examined with file. In other words, the bootloader is present.
-            if 'executable' in stdout:
-                return True
-        return False
 
     boot = hardware.dispatch_to_managers('get_boot_info')
 
@@ -186,19 +202,7 @@ def _is_bootloader_loaded(dev):
     except processutils.ProcessExecutionError:
         return False
 
-    lines = stdout.splitlines()
-    for line in lines:
-        partition = line.split(':')
-        try:
-            # Find the bootable device, and check the base
-            # device and partition for bootloader contents.
-            if 'boot' in partition[6]:
-                if (_has_boot_sector(dev)
-                    or _has_boot_sector(partition[0])):
-                    return True
-        except IndexError:
-            continue
-    return False
+    return _find_bootable_device(stdout, dev)
 
 
 def _get_efi_bootloaders(location):
@@ -274,7 +278,6 @@ def _manage_uefi(device, efi_system_part_uuid=None):
              using the efibootmgr.
              False - if no efi bootloader is found.
     """
-    efi_partition = None
     efi_partition_mount_point = None
     efi_mounted = False
 
@@ -326,6 +329,7 @@ def _manage_uefi(device, efi_system_part_uuid=None):
         LOG.error(error_msg)
         raise errors.CommandExecutionError(error_msg)
     finally:
+        LOG.debug('Executing _manage_uefi clean-up.')
         umount_warn_msg = "Unable to umount %(local_path)s. Error: %(error)s"
 
         try:
@@ -462,6 +466,29 @@ def _prepare_boot_partitions_for_softraid(device, holders, efi_part,
     return efi_partitions
 
 
+def _umount_all_partitions(path, path_variable, umount_warn_msg):
+    """Umount all partitions we may have mounted"""
+    umount_binds_success = True
+    LOG.debug("Unmounting all vfat partitions inside the image ...")
+    try:
+        utils.execute('chroot %(path)s /bin/sh -c "umount -a -t vfat"' %
+                      {'path': path}, shell=True,
+                      env_variables={'PATH': path_variable})
+    except processutils.ProcessExecutionError as e:
+        LOG.warning("Unable to umount vfat partitions. Error: %(error)s",
+                    {'error': e})
+
+    for fs in BIND_MOUNTS + ('/sys',):
+        try:
+            utils.execute('umount', path + fs, attempts=3,
+                          delay_on_retry=True)
+        except processutils.ProcessExecutionError as e:
+            umount_binds_success = False
+            LOG.warning(umount_warn_msg, {'path': path + fs, 'error': e})
+
+    return umount_binds_success
+
+
 def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
                    prep_boot_part_uuid=None, target_boot_mode='bios'):
     """Install GRUB2 bootloader on a given device."""
@@ -471,7 +498,9 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
     efi_part = None
     efi_partition_mount_point = None
     efi_mounted = False
+    efi_preserved = False
     holders = None
+    path_variable = _get_path_variable()
 
     # NOTE(TheJulia): Seems we need to get this before ever possibly
     # restart the device in the case of multi-device RAID as pyudev
@@ -525,27 +554,53 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
             disks = [device]
 
         utils.execute('mount', root_partition, path)
-        for fs in BIND_MOUNTS:
-            utils.execute('mount', '-o', 'bind', fs, path + fs)
 
-        utils.execute('mount', '-t', 'sysfs', 'none', path + '/sys')
+        _mount_for_chroot(path)
+
+        # UEFI asset management for RAID is handled elsewhere
+        if not hardware.is_md_device(device) and efi_partition_mount_point:
+            # NOTE(TheJulia): It may make sense to retool all efi
+            # asset preservation logic at some point since the paths
+            # can be a little different, but largely this is JUST for
+            # partition images as there _should not_ be a mount
+            # point if we have no efi partitions at all.
+            efi_preserved = _try_preserve_efi_assets(
+                device, path, efi_system_part_uuid,
+                efi_partitions, efi_partition_mount_point)
+            if efi_preserved:
+                _append_uefi_to_fstab(path, efi_system_part_uuid)
+                # Success preserving efi assets
+                return
+            else:
+                # Failure, either via exception or not found
+                # which in this case the partition needs to be
+                # remounted.
+                LOG.debug('No EFI assets were preserved for setup or the '
+                          'ramdisk was unable to complete the setup. '
+                          'falling back to bootloader installation from'
+                          'deployed image.')
+                if not os.path.ismount(root_partition):
+                    LOG.debug('Re-mounting the root partition.')
+                    utils.execute('mount', root_partition, path)
 
         binary_name = "grub"
         if os.path.exists(os.path.join(path, 'usr/sbin/grub2-install')):
             binary_name = "grub2"
 
-        # Add /bin to PATH variable as grub requires it to find efibootmgr
-        # when running in uefi boot mode.
-        # Add /usr/sbin to PATH variable to ensure it is there as we do
-        # not use full path to grub binary anymore.
-        path_variable = os.environ.get('PATH', '')
-        path_variable = '%s:/bin:/usr/sbin:/sbin' % path_variable
+        # Mount all vfat partitions listed in the fstab of the root partition.
+        # This is to make sure grub2 finds all files it needs, as some of them
+        # may not be inside the root partition but in the ESP (like grub2env).
+        LOG.debug("Mounting all partitions inside the image ...")
+        utils.execute('chroot %(path)s /bin/sh -c "mount -a -t vfat"' %
+                      {'path': path}, shell=True,
+                      env_variables={'PATH': path_variable})
 
         if efi_partitions:
             if not os.path.exists(efi_partition_mount_point):
                 os.makedirs(efi_partition_mount_point)
-            LOG.info("GRUB2 will be installed for UEFI on efi partitions %s",
-                     efi_partitions)
+            LOG.warning("GRUB2 will be installed for UEFI on efi partitions "
+                        "%s using the install command which does not place "
+                        "Secure Boot signed binaries.", efi_partitions)
             for efi_partition in efi_partitions:
                 utils.execute(
                     'mount', efi_partition, efi_partition_mount_point)
@@ -611,28 +666,13 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
                 LOG.debug("GRUB2 successfully installed on device %s",
                           grub_disk)
 
-        # If the image has dracut installed, set the rd.md.uuid kernel
-        # parameter for discovered md devices.
-        if hardware.is_md_device(device) and _has_dracut(path):
-            rd_md_uuids = ["rd.md.uuid=%s" % x['UUID']
-                           for x in hardware.md_get_raid_devices().values()]
+        # NOTE(TheJulia): Setup grub configuration again since IF we reach
+        # this point, then we've manually installed grub which is not the
+        # recommended path.
+        _configure_grub(device, path)
 
-            LOG.debug("Setting rd.md.uuid kernel parameters: %s", rd_md_uuids)
-            with open('%s/etc/default/grub' % path, 'r') as g:
-                contents = g.read()
-            with open('%s/etc/default/grub' % path, 'w') as g:
-                g.write(
-                    re.sub(r'GRUB_CMDLINE_LINUX="(.*)"',
-                           r'GRUB_CMDLINE_LINUX="\1 %s"'
-                           % " ".join(rd_md_uuids),
-                           contents))
-
-        # Generate the grub configuration file
-        utils.execute('chroot %(path)s /bin/sh -c '
-                      '"%(bin)s-mkconfig -o '
-                      '/boot/%(bin)s/grub.cfg"' %
-                      {'path': path, 'bin': binary_name}, shell=True,
-                      env_variables={'PATH': path_variable})
+        if efi_mounted:
+            _append_uefi_to_fstab(path, efi_system_part_uuid)
 
         LOG.info("GRUB2 successfully installed on %s", device)
 
@@ -643,9 +683,9 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
         raise errors.CommandExecutionError(error_msg)
 
     finally:
-        umount_warn_msg = "Unable to umount %(path)s. Error: %(error)s"
+        LOG.debug('Executing _install_grub2 clean-up.')
         # Umount binds and partition
-        umount_binds_fail = False
+        umount_warn_msg = "Unable to umount %(path)s. Error: %(error)s"
 
         # If umount fails for efi partition, then we cannot be sure that all
         # the changes were written back to the filesystem.
@@ -659,23 +699,10 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
             LOG.error(error_msg)
             raise errors.CommandExecutionError(error_msg)
 
-        for fs in BIND_MOUNTS:
-            try:
-                utils.execute('umount', path + fs, attempts=3,
-                              delay_on_retry=True)
-            except processutils.ProcessExecutionError as e:
-                umount_binds_fail = True
-                LOG.warning(umount_warn_msg, {'path': path + fs, 'error': e})
-
-        try:
-            utils.execute('umount', path + '/sys', attempts=3,
-                          delay_on_retry=True)
-        except processutils.ProcessExecutionError as e:
-            umount_binds_fail = True
-            LOG.warning(umount_warn_msg, {'path': path + '/sys', 'error': e})
-
         # If umounting the binds succeed then we can try to delete it
-        if not umount_binds_fail:
+        if _umount_all_partitions(path,
+                                  path_variable,
+                                  umount_warn_msg):
             try:
                 utils.execute('umount', path, attempts=3, delay_on_retry=True)
             except processutils.ProcessExecutionError as e:
@@ -686,12 +713,270 @@ def _install_grub2(device, root_uuid, efi_system_part_uuid=None,
                 shutil.rmtree(path)
 
 
+def _get_path_variable():
+    # Add /bin to PATH variable as grub requires it to find efibootmgr
+    # when running in uefi boot mode.
+    # Add /usr/sbin to PATH variable to ensure it is there as we do
+    # not use full path to grub binary anymore.
+    path_variable = os.environ.get('PATH', '')
+    return '%s:/bin:/usr/sbin:/sbin' % path_variable
+
+
+def _configure_grub(device, path):
+    """Make consolidated grub configuration as it is device aware.
+
+    :param device: The device for the filesystem.
+    :param path: The path in which the filesystem is mounted.
+    """
+    LOG.debug('Attempting to generate grub Configuration')
+    path_variable = _get_path_variable()
+    binary_name = "grub"
+    if os.path.exists(os.path.join(path, 'usr/sbin/grub2-install')):
+        binary_name = "grub2"
+    # If the image has dracut installed, set the rd.md.uuid kernel
+    # parameter for discovered md devices.
+    if hardware.is_md_device(device) and _has_dracut(path):
+        rd_md_uuids = ["rd.md.uuid=%s" % x['UUID']
+                       for x in hardware.md_get_raid_devices().values()]
+        LOG.debug("Setting rd.md.uuid kernel parameters: %s", rd_md_uuids)
+        with open('%s/etc/default/grub' % path, 'r') as g:
+            contents = g.read()
+        with open('%s/etc/default/grub' % path, 'w') as g:
+            g.write(
+                re.sub(r'GRUB_CMDLINE_LINUX="(.*)"',
+                       r'GRUB_CMDLINE_LINUX="\1 %s"'
+                       % " ".join(rd_md_uuids),
+                       contents))
+
+    utils.execute('chroot %(path)s /bin/sh -c '
+                  '"%(bin)s-mkconfig -o '
+                  '/boot/%(bin)s/grub.cfg"' %
+                  {'path': path, 'bin': binary_name}, shell=True,
+                  env_variables={'PATH': path_variable,
+                                 'GRUB_DISABLE_OS_PROBER': 'true',
+                                 'GRUB_SAVEDEFAULT': 'true'},
+                  use_standard_locale=True)
+    LOG.debug('Completed basic grub configuration.')
+
+
+def _mount_for_chroot(path):
+    """Mount items for grub-mkconfig to succeed."""
+    LOG.debug('Mounting Linux standard partitions for bootloader '
+              'configuration generation')
+    for fs in BIND_MOUNTS:
+        utils.execute('mount', '-o', 'bind', fs, path + fs)
+    utils.execute('mount', '-t', 'sysfs', 'none', path + '/sys')
+
+
+def _try_preserve_efi_assets(device, path,
+                             efi_system_part_uuid,
+                             efi_partitions,
+                             efi_partition_mount_point):
+    """Attempt to preserve UEFI boot assets.
+
+    :param device: The device upon which wich to try to preserve
+                   assets.
+    :param path: The path in which the filesystem is already mounted
+                 which we should examine to preserve assets from.
+    :param efi_system_part_uuid: The partition ID representing the
+                                 created EFI system partition.
+    :param efi_partitions: The list of partitions upon wich to
+                           write the preserved assets to.
+    :param efi_partition_mount_point: The folder at which to mount
+                                      the assets for the process of
+                                      preservation.
+
+    :returns: True if assets have been preserved, otherwise False.
+              None is the result of this method if a failure has
+              occured.
+    """
+    efi_assets_folder = efi_partition_mount_point + '/EFI'
+    if os.path.exists(efi_assets_folder):
+        # We appear to have EFI Assets, that need to be preserved
+        # and as such if we succeed preserving them, we will be returned
+        # True from _preserve_efi_assets to correspond with success or
+        # failure in this action.
+        # NOTE(TheJulia): Still makes sense to invoke grub-install as
+        # fragmentation of grub has occured.
+        if (os.path.exists(os.path.join(path, 'usr/sbin/grub2-install'))
+            or os.path.exists(os.path.join(path, 'usr/sbin/grub-install'))):
+            _configure_grub(device, path)
+        # But first, if we have grub, we should try to build a grub config!
+        LOG.debug('EFI asset folder detected, attempting to preserve assets.')
+        if _preserve_efi_assets(path, efi_assets_folder,
+                                efi_partitions,
+                                efi_partition_mount_point):
+            try:
+                # Since we have preserved the assets, we should be able
+                # to call the _efi_boot_setup method to scan the device
+                # and add loader entries
+                efi_preserved = _efi_boot_setup(device, efi_system_part_uuid)
+                # Executed before the return so we don't return and then begin
+                # execution.
+                return efi_preserved
+            except Exception as e:
+                # Remount the partition and proceed as we were.
+                LOG.debug('Exception encountered while attempting to '
+                          'setup the EFI loader from a root '
+                          'filesystem. Error: %s', e)
+
+
+def _append_uefi_to_fstab(fs_path, efi_system_part_uuid):
+    """Append the efi partition id to the filesystem table.
+
+    :param fs_path:
+    :param efi_system_part_uuid:
+    """
+    fstab_file = os.path.join(fs_path, 'etc/fstab')
+    if not os.path.exists(fstab_file):
+        return
+    try:
+        fstab_string = ("UUID=%s\t/boot/efi\tvfat\tumask=0077\t"
+                        "0\t1\n") % efi_system_part_uuid
+        with open(fstab_file, "r+") as fstab:
+            if efi_system_part_uuid not in fstab.read():
+                fstab.writelines(fstab_string)
+    except (OSError, EnvironmentError, IOError) as exc:
+        LOG.debug('Failed to add entry to /etc/fstab. Error %s', exc)
+    LOG.debug('Added entry to /etc/fstab for EFI partition auto-mount '
+              'with uuid %s', efi_system_part_uuid)
+
+
+def _efi_boot_setup(device, efi_system_part_uuid=None, target_boot_mode=None):
+    """Identify and setup an EFI bootloader from supplied partition/disk.
+
+    :param device: The device upon which to attempt the EFI bootloader setup.
+    :param efi_system_part_uuid: The partition UUID to utilize in searching
+                                 for an EFI bootloader.
+    :param target_boot_mode: The requested boot mode target for the
+                             machine. This is optional and is mainly used
+                             for the purposes of identifying a mismatch and
+                             reporting a warning accordingly.
+    :returns: True if we succeeded in setting up an EFI bootloader in the
+              EFI nvram table.
+              False if we were unable to set the machine to EFI boot,
+              due to inability to locate assets required OR the efibootmgr
+              tool not being present.
+              None is returned if the node is NOT in UEFI boot mode or
+              the system is deploying upon a software RAID device.
+    """
+    boot = hardware.dispatch_to_managers('get_boot_info')
+    # Explicitly only run if a target_boot_mode is set which prevents
+    # callers following-up from re-logging the same message
+    if target_boot_mode and boot.current_boot_mode != target_boot_mode:
+        LOG.warning('Boot mode mismatch: target boot mode is %(target)s, '
+                    'current boot mode is %(current)s. Installing boot '
+                    'loader may fail or work incorrectly.',
+                    {'target': target_boot_mode,
+                     'current': boot.current_boot_mode})
+
+    # FIXME(arne_wiebalck): make software RAID work with efibootmgr
+    if (boot.current_boot_mode == 'uefi'
+            and not hardware.is_md_device(device)):
+        try:
+            utils.execute('efibootmgr', '--version')
+        except FileNotFoundError:
+            LOG.warning("efibootmgr is not available in the ramdisk")
+        else:
+            if _manage_uefi(device,
+                            efi_system_part_uuid=efi_system_part_uuid):
+                return True
+        return False
+
+
+def _preserve_efi_assets(path, efi_assets_folder, efi_partitions,
+                         efi_partition_mount_point):
+    """Preserve the EFI assets in a partition image.
+
+    :param path: The path used for the mounted image filesystem.
+    :param efi_assets_folder: The folder where we can find the
+                              UEFI assets required for booting.
+    :param efi_partitions: The list of partitions upon which to
+                           write the perserved assets to.
+    :param efi_partition_mount_point: The folder at which to mount
+                                      the assets for the process of
+                                      preservation.
+    :returns: True if EFI assets were able to be located and preserved
+              to their appropriate locations based upon the supplied
+              efi_partitions list.
+              False if any error is encountered in this process.
+    """
+    try:
+        save_efi = os.path.join(tempfile.mkdtemp(), 'efi_loader')
+        LOG.debug('Copying EFI assets to %s.', save_efi)
+        shutil.copytree(efi_assets_folder, save_efi)
+
+        # Identify grub2 config file for EFI booting as grub may require it
+        # in the folder.
+
+        destlist = os.listdir(efi_assets_folder)
+        grub2_file = os.path.join(path, 'boot/grub2/grub.cfg')
+        if os.path.isfile(grub2_file):
+            LOG.debug('Local Grub2 configuration detected.')
+            # A grub2 config seems to be present, we should preserve it!
+            for dest in destlist:
+                grub_dest = os.path.join(save_efi, dest, 'grub.cfg')
+                if not os.path.isfile(grub_dest):
+                    LOG.debug('A grub.cfg file was not found in %s. %s'
+                              'will be copied to that location.',
+                              grub_dest, grub2_file)
+                    try:
+                        shutil.copy2(grub2_file, grub_dest)
+                    except (IOError, OSError, shutil.SameFileError) as e:
+                        LOG.warning('Failed to copy grub.cfg file for '
+                                    'EFI boot operation. Error %s', e)
+        grub2_env_file = os.path.join(path, 'boot/grub2/grubenv')
+        # NOTE(TheJulia): By saving the default, this file should be created.
+        # this appears to what diskimage-builder does.
+        # if the file is just a file, then we'll need to copy it. If it is
+        # anything else like a link, we're good. This behaivor is inconsistent
+        # depending on packager install scripts for grub.
+        if os.path.isfile(grub2_env_file):
+            LOG.debug('Detected grub environment file %s, will attempt '
+                      'to copy this file to align with apparent bootloaders',
+                      grub2_env_file)
+            for dest in destlist:
+                grub2env_dest = os.path.join(save_efi, dest, 'grubenv')
+                if not os.path.isfile(grub2env_dest):
+                    LOG.debug('A grubenv file was not found. Copying '
+                              'to %s along with the grub.cfg file as '
+                              'grub generally expects it is present.',
+                              grub2env_dest)
+                    try:
+                        shutil.copy2(grub2_env_file, grub2env_dest)
+                    except (IOError, OSError, shutil.SameFileError) as e:
+                        LOG.warning('Failed to copy grubenv file. '
+                                    'Error: %s', e)
+        # Loop through partitions because software RAID.
+        for efi_part in efi_partitions:
+            utils.execute('mount', '-t', 'vfat', efi_part,
+                          efi_partition_mount_point)
+            shutil.copytree(save_efi, efi_assets_folder)
+            LOG.debug('Files preserved to %(disk)s for %(part)s. '
+                      'Files: %(filelist)s From: %(from)s',
+                      {'disk': efi_part,
+                       'part': efi_partition_mount_point,
+                       'filelist': os.listdir(efi_assets_folder),
+                       'from': save_efi})
+            utils.execute('umount', efi_partition_mount_point)
+        return True
+    except Exception as e:
+        LOG.debug('Failed to preserve EFI assets. Error %s', e)
+        try:
+            utils.execute('umount', efi_partition_mount_point)
+        except Exception as e:
+            LOG.debug('Exception encountered while attempting unmount '
+                      'the EFI partition mount point. Error: %s', e)
+        return False
+
+
 class ImageExtension(base.BaseAgentExtension):
 
     @base.async_command('install_bootloader')
     def install_bootloader(self, root_uuid, efi_system_part_uuid=None,
                            prep_boot_part_uuid=None,
-                           target_boot_mode='bios'):
+                           target_boot_mode='bios',
+                           ignore_bootloader_failure=None):
         """Install the GRUB2 bootloader on the image.
 
         :param root_uuid: The UUID of the root partition.
@@ -713,33 +998,30 @@ class ImageExtension(base.BaseAgentExtension):
         if self.agent.iscsi_started:
             iscsi.clean_up(device)
 
-        boot = hardware.dispatch_to_managers('get_boot_info')
-        if boot.current_boot_mode != target_boot_mode:
-            LOG.warning('Boot mode mismatch: target boot mode is %(target)s, '
-                        'current boot mode is %(current)s. Installing boot '
-                        'loader may fail or work incorrectly.',
-                        {'target': target_boot_mode,
-                         'current': boot.current_boot_mode})
+        # Always allow the API client to be the final word on if this is
+        # overridden or not.
+        if ignore_bootloader_failure is None:
+            ignore_failure = CONF.ignore_bootloader_failure
+        else:
+            ignore_failure = ignore_bootloader_failure
 
-        # FIXME(arne_wiebalck): make software RAID work with efibootmgr
-        if (boot.current_boot_mode == 'uefi'
-                and not hardware.is_md_device(device)):
-            has_efibootmgr = True
-            try:
-                utils.execute('efibootmgr', '--version')
-            except FileNotFoundError:
-                LOG.warning("efibootmgr is not available in the ramdisk")
-                has_efibootmgr = False
-
-            if has_efibootmgr:
-                if _manage_uefi(device,
-                                efi_system_part_uuid=efi_system_part_uuid):
-                    return
+        try:
+            if _efi_boot_setup(device, efi_system_part_uuid, target_boot_mode):
+                return
+        except Exception as e:
+            LOG.error('Error setting up bootloader. Error %s', e)
+            if not ignore_failure:
+                raise
 
         # In case we can't use efibootmgr for uefi we will continue using grub2
         LOG.debug('Using grub2-install to set up boot files')
-        _install_grub2(device,
-                       root_uuid=root_uuid,
-                       efi_system_part_uuid=efi_system_part_uuid,
-                       prep_boot_part_uuid=prep_boot_part_uuid,
-                       target_boot_mode=target_boot_mode)
+        try:
+            _install_grub2(device,
+                           root_uuid=root_uuid,
+                           efi_system_part_uuid=efi_system_part_uuid,
+                           prep_boot_part_uuid=prep_boot_part_uuid,
+                           target_boot_mode=target_boot_mode)
+        except Exception as e:
+            LOG.error('Error setting up bootloader. Error %s', e)
+            if not ignore_failure:
+                raise
